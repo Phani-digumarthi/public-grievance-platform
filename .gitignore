@@ -1,21 +1,14 @@
-# Dependencies
-node_modules/
-venv/
-__pycache__/
+# --- IGNORE LARGE FILES (GitHub Limit > 100MB) ---
+ai-engine/ffmpeg.exe
+ai-engine/ffprobe.exe
+ai-engine/ffplay.exe
 
-# Next.js build output
-.next/
-out/
-build/
-dist/
-
-# Environment Variables (Keep these secret!)
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# System files
+# --- IGNORE GARBAGE ---
+.git
 .DS_Store
 Thumbs.db
+__pycache__/
+*.py[cod]
+
+# --- ALLOW EVERYTHING ELSE (Team Setup) ---
+# (Intentionally NOT ignoring node_modules, venv, uploads, etc.)
