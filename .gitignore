@@ -1,14 +1,32 @@
-# --- IGNORE LARGE FILES (GitHub Limit > 100MB) ---
-ai-engine/ffmpeg.exe
-ai-engine/ffprobe.exe
-ai-engine/ffplay.exe
+# --- DEPENDENCIES ---
+node_modules/
+venv/
+.venv/
 
-# --- IGNORE GARBAGE ---
-.git
-.DS_Store
-Thumbs.db
+# --- PYTHON ---
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
+*.pyd
 
-# --- ALLOW EVERYTHING ELSE (Team Setup) ---
-# (Intentionally NOT ignoring node_modules, venv, uploads, etc.)
+# --- NEXT.JS / REACT ---
+.next/
+out/
+build/
+dist/
+.DS_Store
+
+# --- ENVIRONMENT VARIABLES (Secrets) ---
+.env
+.env.local
+.env.production
+.env.development
+
+# --- SERVER UPLOADS (Don't push test audio/images) ---
+server/uploads/*
+!server/uploads/.gitkeep
+
+# --- LOGS ---
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

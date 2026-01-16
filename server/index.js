@@ -3,8 +3,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const axios = require('axios');
-const multer = require('multer'); // Import multer
+const multer = require('multer');
 const path = require('path');
+const FormData = require('form-data'); 
+const fs = require('fs');
 require('dotenv').config();
 
 const Grievance = require('./models/Grievance');
@@ -13,16 +15,15 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Allow the frontend to view uploaded images
+// Allow the frontend to view uploaded images/audio
 app.use('/uploads', express.static('uploads'));
 
-// Configure Image Storage
+// Configure Storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/'); // Save files here
+    cb(null, 'uploads/'); 
   },
   filename: (req, file, cb) => {
-    // Name file: timestamp-originalName.jpg
     cb(null, Date.now() + path.extname(file.originalname)); 
   }
 });
@@ -35,88 +36,84 @@ mongoose.connect(process.env.MONGODB_URI)
 
 app.get('/', (req, res) => res.send('Backend Running'));
 
-// === NEW ROUTE HANDLING TEXT + IMAGE ===
-// upload.single('image') expects a form field named "image"
+// === ROUTE 1: TEXT + IMAGE GRIEVANCES ===
 app.post('/api/grievances', upload.single('image'), async (req, res) => {
   try {
-    // 1. Get Text Data
-    const { description } = req.body;
-    
-    // 2. Get Image Data (if it exists)
+    const { description, citizenName, area } = req.body; 
     const imageUrl = req.file ? `http://localhost:5000/uploads/${req.file.filename}` : "";
 
-    console.log("📨 Data:", description);
-    console.log("📸 Image:", imageUrl || "No image uploaded");
+    console.log(`📨 Text Report from ${citizenName}`);
 
-    // 3. Call Python AI (Text Analysis)
-    const aiResponse = await axios.post('http://127.0.0.1:8000/predict-category', {
-      description: description
-    });
+    // Call Python AI
+    const aiResponse = await axios.post('http://127.0.0.1:8000/predict-category', { description });
+    
+    const { category, priority, sentiment, estimated_time } = aiResponse.data;
 
-    const { category, confidence, priority, sentiment } = aiResponse.data;
-
-    // 4. Save everything to MongoDB
     const newGrievance = await Grievance.create({
+      citizenName, 
+      area,        
       description,
-      imageUrl, // Saved!
+      imageUrl,
       category,
-      aiConfidence: confidence,
       priority,
       sentiment,
+      estimatedTime: estimated_time,
       status: "Pending"
     });
 
     res.json({ success: true, data: newGrievance });
 
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Text/Image Error:", error.message);
     res.status(500).json({ success: false, error: "Server Error" });
   }
 });
 
-// Get Grievances
-app.get('/api/grievances', async (req, res) => {
+// === ROUTE 2: AUDIO + IMAGE GRIEVANCES (FIXED) ===
+// We use upload.fields to accept BOTH audio and image
+app.post('/api/grievances/audio', 
+  upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'image', maxCount: 1 }]), 
+  async (req, res) => {
   try {
-    const grievances = await Grievance.find().sort({ createdAt: -1 });
-    res.json({ success: true, data: grievances });
-  } catch (error) {
-    res.status(500).json({ success: false, error: "Fetch Error" });
-  }
-});
-// server/index.js
+    // Check if audio file exists
+    if (!req.files || !req.files.audio) {
+        return res.status(400).json({ error: "No audio file uploaded" });
+    }
 
-// ... (keep all your existing imports and setups)
+    const audioFile = req.files.audio[0];
+    const imageFile = req.files.image ? req.files.image[0] : null; // Check for optional image
 
-// === NEW ROUTE FOR AUDIO GRIEVANCES ===
-app.post('/api/grievances/audio', upload.single('audio'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: "No audio file uploaded" });
+    const { citizenName, area } = req.body; 
+    console.log(`🎤 Voice Report from ${citizenName}`);
 
-    console.log("🎤 Audio received:", req.file.filename);
-
-    // 1. Send Audio to Python for Transcription & Analysis
-    // We must use 'FormData' logic in Node.js to forward the file
-    const FormData = require('form-data');
-    const fs = require('fs');
-    
+    // 1. Prepare Audio to send to Python
     const form = new FormData();
-    form.append('file', fs.createReadStream(req.file.path));
+    form.append('file', fs.createReadStream(audioFile.path));
 
+    // 2. Call Python AI
     const aiResponse = await axios.post('http://127.0.0.1:8000/predict-audio', form, {
       headers: { ...form.getHeaders() }
     });
 
-    console.log("🤖 AI Transcribed:", aiResponse.data.original_text);
-    const { category, priority, sentiment, original_text } = aiResponse.data;
+    console.log("🤖 Transcribed:", aiResponse.data.original_text);
 
-    // 2. Save to MongoDB (We save the transcribed text as the description)
+    // 3. Construct URLs
+    const audioUrl = `http://localhost:5000/uploads/${audioFile.filename}`;
+    const imageUrl = imageFile ? `http://localhost:5000/uploads/${imageFile.filename}` : "";
+
+    const { category, priority, sentiment, original_text, estimated_time } = aiResponse.data;
+
     const newGrievance = await Grievance.create({
-      description: original_text, // The text converted from voice
+      citizenName,
+      area,
+      description: original_text,
       category,
       priority,
       sentiment,
+      estimatedTime: estimated_time,
       status: "Pending",
-      imageUrl: "" // Audio complaints might not have images
+      imageUrl: imageUrl, // Now we save the image too!
+      audioUrl: audioUrl
     });
 
     res.json({ success: true, data: newGrievance });
@@ -127,7 +124,58 @@ app.post('/api/grievances/audio', upload.single('audio'), async (req, res) => {
   }
 });
 
-// ... (app.listen is here)
+// === ROUTE 3: GET ALL GRIEVANCES ===
+app.get('/api/grievances', async (req, res) => {
+  try {
+    const grievances = await Grievance.find().sort({ createdAt: -1 });
+    res.json({ success: true, data: grievances });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Fetch Error" });
+  }
+});
+
+// server/index.js (Add this before app.listen)
+
+// === ROUTE 4: RESOLVE GRIEVANCE ===
+app.patch('/api/grievances/:id/resolve', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adminReply } = req.body; // Get the message from Admin
+
+    const updatedGrievance = await Grievance.findByIdAndUpdate(
+      id,
+      { 
+        status: "Resolved",
+        adminReply: adminReply // Save the reply
+      },
+      { new: true }
+    );
+
+    res.json({ success: true, data: updatedGrievance });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Update Failed" });
+  }
+});
+// server/index.js
+
+// ... previous resolve route ...
+
+// === ROUTE 5: REJECT / SPAM GRIEVANCE ===
+app.patch('/api/grievances/:id/reject', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const updatedGrievance = await Grievance.findByIdAndUpdate(
+      id,
+      { status: "Rejected" }, // Mark as Rejected
+      { new: true }
+    );
+
+    res.json({ success: true, data: updatedGrievance });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Update Failed" });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on Port ${PORT}`));
